@@ -264,9 +264,13 @@ def main():
     if not chosen:
         return 0
 
-    py = sys.executable  # 跟 launcher 同一个解释器（venv）
-    # 目标脚本可能需要参数：你可以在这里扩展，比如读取额外输入
-    cmd = f"{shlex.quote(py)} {shlex.quote(chosen)}"
+    # ✅ 构造命令：跨平台最稳的方式是分平台 quote
+    if sys.platform.startswith("win"):
+        # Windows 用 list2cmdline，避免空格/反斜杠地狱
+        cmd = subprocess.list2cmdline([sys.executable, chosen])
+    else:
+        # macOS/Linux 用 shlex.quote
+        cmd = f"{shlex.quote(sys.executable)} {shlex.quote(chosen)}"
 
     open_terminal_and_run(cmd, cwd=dir_path)
     return 0
