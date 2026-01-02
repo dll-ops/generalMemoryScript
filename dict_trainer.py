@@ -1,3 +1,4 @@
+#win适配（未完成）-通用记忆程序
 # -*- coding: utf-8 -*-
 """Dictionary Trainer (Terminal, curses UI)
 

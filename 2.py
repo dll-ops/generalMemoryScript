@@ -1,3 +1,4 @@
+#beta2
 # -*- coding: utf-8 -*-
 """
 AB 词汇/句子对照记忆（GUI）

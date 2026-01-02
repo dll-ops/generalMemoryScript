@@ -1,4 +1,4 @@
-
+#mac适配-通用记忆程序
 # -*- coding: utf-8 -*-
 """Dictionary Trainer (Terminal, curses UI)
 
@@ -29,11 +29,13 @@ import csv
 import curses
 import json
 import locale
-import os
+import os, json
 import random
 import re
 import time
 import uuid
+import difflib
+import hashlib
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -45,6 +47,163 @@ SEPS_PATTERN = re.compile(r"[,\s，、;；|/]+")
 ALTS_PATTERN = re.compile(r"\s*(?:\||；|;|/|、)\s*")
 import unicodedata
 import locale
+
+_PUNCT_RE = re.compile(r"[，。！？；：、,.!?;:\-—()\[\]{}\"'“”‘’·…]+")
+_WS_RE = re.compile(r"\s+")
+
+def _norm(s: str) -> str:
+    s = s.strip().lower()
+    s = s.replace("　", " ")              # 全角空格
+    s = _PUNCT_RE.sub("", s)              # 去标点
+    s = _WS_RE.sub(" ", s)                # 合并空白
+    return s.strip()
+
+def _short_suffix_collapse(s: str) -> str:
+    # 只对极短答案做“是/是的”这种容忍
+    # 你可以按自己的习惯继续加
+    mapping = {
+        "是的": "是",
+        "对的": "对",
+        "好的": "好",
+        "可以的": "可以",
+        "不是的": "不是",
+        "不对的": "不对",
+    }
+    return mapping.get(s, s)
+
+def is_correct_fuzzy(user: str, correct: str, *, threshold: float = 0.80, min_len_for_fuzzy: int = 4) -> bool:
+    u = _norm(user)
+    c = _norm(correct)
+
+    # 先处理“是/是的”这类短后缀
+    u2 = _short_suffix_collapse(u)
+    c2 = _short_suffix_collapse(c)
+
+    # 先给一个“宽松的完全匹配”
+    if u2 == c2:
+        return True
+
+    # 太短就别模糊（避免把“是”随便判对）
+    if len(c2) < min_len_for_fuzzy:
+        return False
+
+    # 相似度（SequenceMatcher 基于编辑/块匹配，够用且无依赖）
+    ratio = difflib.SequenceMatcher(None, u2, c2).ratio()
+    return ratio >= threshold
+
+import os, json
+
+def _pref_path() -> str:
+    # 放在项目同目录（最符合你“可复用、可携带”的诉求）
+    # 如果你更想全局记忆，也可以换成 os.path.expanduser("~/.generalMemoryScript.json")
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, ".gms_prefs.json")
+
+def load_prefs() -> dict:
+    p = _pref_path()
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_prefs(d: dict) -> None:
+    p = _pref_path()
+    try:
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def get_last_deck_path() -> str | None:
+    d = load_prefs()
+    path = d.get("last_deck_path")
+    if path and os.path.isfile(path):
+        return path
+    return None
+
+def set_last_deck_path(path: str) -> None:
+    d = load_prefs()
+    d["last_deck_path"] = path
+    save_prefs(d)
+
+def ensure_deck_ready(stdscr, state) -> bool:
+    """
+    若当前仍是内置默认词典（2条 bonjour/merci）且存在上次词典，
+    则提示是否应用上次词典。用户选择否，则继续使用当前词典。
+    返回 True 表示可以继续进入训练模式；False 表示用户取消返回菜单。
+    """
+    last_path = get_last_deck_path()
+    if not last_path:
+        return True
+
+    # 你现在的“默认词典”识别方式：按你描述就是两条 bonjour/merci
+    # 用更稳妥的方法：deck_path 是 "<内置示例>" 或 len(deck)==2 且内容匹配
+    try:
+        is_default = (
+            getattr(state, "deck_path", "") == "<内置示例>" or
+            (len(state.deck) == 2 and
+             norm_text(state.deck[0].get("A","")) == "bonjour" and
+             norm_text(state.deck[1].get("A","")) == "merci")
+        )
+    except Exception:
+        is_default = False
+
+    if not is_default:
+        return True
+
+    # 弹窗询问（你项目里如果已有 yes/no 弹窗函数就用你的）
+    draw_header(stdscr, "检测到上次词典")
+    center_text(stdscr, 6, "当前未导入词典。是否应用上次使用的词典？")
+    safe_addstr(stdscr, 8, 4, f"上次词典：{last_path}")
+    safe_addstr(stdscr, 10, 4, "按 y 应用；按 n 继续使用当前默认词典；按 Esc 返回")
+    stdscr.refresh()
+
+    k = wait_key(stdscr)
+    if k == "esc":
+        return False
+    if k in ("y", "Y"):
+        # 复用你现有的“加载词典”底层函数
+        # 你代码里大概率有类似：load_deck_from_path(path) 或 read_pairs(path)
+        try:
+            new_state = load_deck_into_state(state, last_path)  # ← 下面第4步会给实现
+            if new_state is not None:
+                # 如果你 load 函数返回 new_state
+                state.deck = new_state.deck
+                state.deck_path = new_state.deck_path
+            else:
+                # 如果是就地修改 state，也可以什么都不做
+                pass
+            return True
+        except Exception as e:
+            draw_header(stdscr, "应用失败")
+            center_text(stdscr, 6, "❌ 读取上次词典失败，已继续使用默认词典。")
+            safe_addstr(stdscr, 8, 4, str(e)[:200])
+            stdscr.refresh()
+            wait_key(stdscr)
+            return True
+    return True
+
+
+def file_sha1(path: str, max_bytes: int = 2_000_000) -> str:
+    """取文件前 max_bytes 做 sha1（够稳定且快）"""
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        h.update(f.read(max_bytes))
+    return h.hexdigest()[:12]
+
+def wrongbook_path_for_deck(deck_path: str) -> str:
+    """
+    为某个词典生成稳定的错题本路径：
+    .wrongbooks/<词典文件名>.<hash>.wrong.json
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    wb_dir = os.path.join(here, ".wrongbooks")
+    os.makedirs(wb_dir, exist_ok=True)
+
+    base = os.path.splitext(os.path.basename(deck_path))[0]
+    sig = file_sha1(deck_path)
+    return os.path.join(wb_dir, f"{base}.{sig}.wrong.json")
 
 def _init_locale():
     # macOS Terminal / iTerm2 通常是 UTF-8；显式设置可减少 curses 乱码/宽字符异常
@@ -584,7 +743,8 @@ def mode_fillin(stdscr, state: State):
             continue
 
         user_norm = norm_text(user)
-        ok = any(user_norm == norm_text(ans) for ans in correct_values)
+        # 先严格再模糊：correct_values 里任意一个答案命中就算对
+        ok = any(is_correct_fuzzy(user, ans, threshold=0.80) for ans in correct_values)
 
         if ok:
             center_text(stdscr, 6, "✅ 正确！")
@@ -860,7 +1020,7 @@ def menu(stdscr, initial_state: State):
         stdscr.refresh()
 
         ch = stdscr.getch()
-        action = None  # IMPORTANT: avoid carrying over previous action
+        action = None;
 
         # Exit
         if ch in (27,):  # ESC
@@ -874,14 +1034,17 @@ def menu(stdscr, initial_state: State):
             sel = (sel + 1) % len(MENU_ITEMS)
             continue
 
-        if ch in (10, 13):  # Enter
+        if ch in (10, 13, curses.KEY_ENTER):  # Enter
             action = MENU_ITEMS[sel][1]
-        elif ord("1") <= ch <= ord("9"):
-            idx = ch - ord("1")
-            if idx < len(MENU_ITEMS):
-                action = MENU_ITEMS[idx][1]
-        elif ch == ord("0") and len(MENU_ITEMS) >= 10:
-            action = MENU_ITEMS[9][1]
+        else:
+            if ord("0") <= ch <= ord("9"):
+                d = ch - ord("0")
+                target = 9 if d == 0 else (d - 1);
+                if 0 <= target < len(MENU_ITEMS):
+                    sel = target
+                continue
+            else:
+                continue
 
         # 主循环（示意：你要放在 while True: 里面）
         key = stdscr.getch()
@@ -899,6 +1062,11 @@ def menu(stdscr, initial_state: State):
             new_state = mode_load_deck(stdscr, state)
             if new_state is not None:
                 state = new_state
+                set_last_deck_path(state.deck_path)
+                # ✅ 关键新增：让错题本跟词典绑定
+                if getattr(state, "deck_path", None) and os.path.isfile(state.deck_path):
+                    state.wrong_path = wrongbook_path_for_deck(state.deck_path)
+                    state.wrong_db = load_wrong_db(state.wrong_path)  # 读老错题本（不存在则空）
 
         elif action == "info":
             mode_info(stdscr, state)
