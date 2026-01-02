@@ -806,6 +806,46 @@ MENU_ITEMS = [
     ("退出", "exit"),
 ]
 
+def menu_handle_key(key: int, sel: int, items):
+    """
+    返回 (action, sel)
+    - ↑/↓/w/s：只移动光标，action=None
+    - Enter：触发当前项 action
+    - q/Esc：退出 action="exit"
+    - 数字键：只跳转光标（不触发）
+    """
+    import curses
+
+    n = len(items)
+
+    # 退出
+    if key in (27, ord("q"), ord("Q")):
+        return "exit", sel
+
+    # 上移
+    if key in (curses.KEY_UP, ord("w"), ord("W")):
+        return None, (sel - 1) % n
+
+    # 下移
+    if key in (curses.KEY_DOWN, ord("s"), ord("S")):
+        return None, (sel + 1) % n
+
+    # 数字直达：1-9；0 表示 10（如果有第10项）
+    if ord("0") <= key <= ord("9"):
+        d = key - ord("0")
+        if d == 0:
+            target = 9  # 第10项
+        else:
+            target = d - 1
+        if 0 <= target < n:
+            sel = target
+        return None, sel
+
+    # 确认：Enter 才触发 action
+    if key in (10, 13, curses.KEY_ENTER):
+        return items[sel][1], sel
+
+    return None, sel
 
 def menu(stdscr, initial_state: State):
     curses.curs_set(0)
@@ -844,7 +884,8 @@ def menu(stdscr, initial_state: State):
             action = MENU_ITEMS[9][1]
 
         # 主循环（示意：你要放在 while True: 里面）
-        action = menu_handle_key(stdscr, key, selected, items)
+        key = stdscr.getch()
+        action, sel = menu_handle_key(key, sel, MENU_ITEMS)
 
         # 只移动光标、不触发任何动作
         if action is None:
