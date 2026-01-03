@@ -588,8 +588,8 @@ def build_mcq(state: State) -> Tuple[str, List[str], int, Dict]:
 
 def build_fillin(state: State) -> Tuple[str, Dict, List[str]]:
     item_idx = random.randrange(len(state.deck))
-    q_field = random.choice(FIELDS)
-    a_field = "B" if q_field == "A" else "A"
+    q_field = "B"
+    a_field = "A"
     item = state.deck[item_idx]
     q_val = item[q_field]
     prompt = f"题干（{FIELD_NAMES[q_field]}）：{q_val}\n请输入对应的 {FIELD_NAMES[a_field]}："
