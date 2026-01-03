@@ -747,7 +747,9 @@ def mode_fillin(stdscr, state: State):
         ok = any(is_correct_fuzzy(user, ans, threshold=0.80) for ans in correct_values)
 
         if ok:
-            center_text(stdscr, 6, "✅ 正确！")
+            safe_addstr(stdscr, 6, 4, f"题目：{q_text}")
+            safe_addstr(stdscr, 7, 4, f"正确答案：{a_text}")
+            center_text(stdscr, 9, "✅ 正确！")
         else:
             center_text(stdscr, 6, "❌ 错误")
             safe_addstr(stdscr, 8, 4, f"正确答案：{' / '.join(correct_values)}")
