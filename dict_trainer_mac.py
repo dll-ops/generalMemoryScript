@@ -742,6 +742,10 @@ def mode_fillin(stdscr, state: State):
                 return
             continue
 
+        item = state.deck[meta["item_index"]]
+        q_text = item[meta["q_field"]]
+        a_text = " / ".join(correct_values)
+
         user_norm = norm_text(user)
         # 先严格再模糊：correct_values 里任意一个答案命中就算对
         ok = any(is_correct_fuzzy(user, ans, threshold=0.80) for ans in correct_values)
