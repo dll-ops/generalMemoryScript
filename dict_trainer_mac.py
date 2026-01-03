@@ -71,6 +71,13 @@ def _short_suffix_collapse(s: str) -> str:
     }
     return mapping.get(s, s)
 
+def word_count(s: str) -> int:
+    # 用 norm_text 统一清洗，再按空格分词
+    t = norm_text(s)
+    if not t:
+        return 0
+    return len([w for w in t.split(" ") if w])
+
 def is_correct_fuzzy(user: str, correct: str, *, threshold: float = 0.80, min_len_for_fuzzy: int = 4) -> bool:
     u = _norm(user)
     c = _norm(correct)
@@ -748,7 +755,14 @@ def mode_fillin(stdscr, state: State):
 
         user_norm = norm_text(user)
         # 先严格再模糊：correct_values 里任意一个答案命中就算对
-        ok = any(is_correct_fuzzy(user, ans, threshold=0.80) for ans in correct_values)
+        def _match_one(ans: str) -> bool:
+            wc = word_count(ans)
+            if wc >= 3:
+                return is_correct_fuzzy(user, ans, threshold=0.80, min_len=1)  # min_len在这里不再负责开关
+            else:
+                return norm_text(user) == norm_text(ans)
+
+        ok = any(_match_one(ans) for ans in correct_values)
 
         if ok:
             safe_addstr(stdscr, 6, 4, f"题目：{q_text}")
