@@ -29,7 +29,8 @@ import csv
 import curses
 import json
 import locale
-import os, json
+import os
+import unicodedata
 import random
 import re
 import time
@@ -289,8 +290,20 @@ def split_alternatives(cell: str) -> List[str]:
 
 def norm_text(s: str) -> str:
     """宽松归一：去首尾空白 + Unicode casefold（对中日韩基本无影响）。"""
-    return safe_str(s).casefold()
+    return strip_accents(safe_str(s)).casefold()
 
+def strip_accents(s: str) -> str:
+    """
+    去除拉丁字母的重音符号：
+    é è ê ë → e
+    不影响中文
+    """
+    if not s:
+        return s
+    return "".join(
+        ch for ch in unicodedata.normalize("NFD", s)
+        if unicodedata.category(ch) != "Mn"
+    )
 
 def choose_delimiter(first_line: str, forced: Optional[str]) -> str:
     if forced:
