@@ -313,9 +313,10 @@ def choose_delimiter(first_line: str, forced: Optional[str]) -> str:
 
 
 def deck_id_from_path(path: str) -> str:
-    # 用文件绝对路径生成一个稳定 ID（避免不同词典共用错题本）
+    # 用文件绝对路径生成稳定 ID（避免不同词典共用错题本）
+    # 注意：内置 hash() 在不同进程会变化，因此用 sha1 做稳定哈希
     ap = os.path.abspath(path)
-    return str(abs(hash(ap)))
+    return hashlib.sha1(ap.encode("utf-8")).hexdigest()[:12]
 
 
 # --------------------------- Loaders ---------------------------
