@@ -30,7 +30,6 @@ import curses
 import json
 import locale
 import os
-import unicodedata
 import random
 import re
 import time
@@ -46,12 +45,11 @@ locale.setlocale(locale.LC_ALL, "")
 
 SEPS_PATTERN = re.compile(r"[,\s，、;；|/]+")
 ALTS_PATTERN = re.compile(r"\s*(?:\||；|;|/|、)\s*")
-import unicodedata
-import locale
 
 _PUNCT_RE = re.compile(r"[，。！？；：、,.!?;:\-—()\[\]{}\"'“”‘’·…]+")
 _WS_RE = re.compile(r"\s+")
 
+# _norm（规范化），用于规范化。
 def _norm(s: str) -> str:
     s = s.strip().lower()
     s = s.replace("　", " ")              # 全角空格
@@ -59,6 +57,7 @@ def _norm(s: str) -> str:
     s = _WS_RE.sub(" ", s)                # 合并空白
     return s.strip()
 
+# _short_suffix_collapse（短后缀合并），用于短后缀合并。
 def _short_suffix_collapse(s: str) -> str:
     # 只对极短答案做“是/是的”这种容忍
     # 你可以按自己的习惯继续加
@@ -72,6 +71,7 @@ def _short_suffix_collapse(s: str) -> str:
     }
     return mapping.get(s, s)
 
+# word_count（词计数），用于词计数。
 def word_count(s: str) -> int:
     # 用 norm_text 统一清洗，再按空格分词
     t = norm_text(s)
@@ -79,6 +79,7 @@ def word_count(s: str) -> int:
         return 0
     return len([w for w in t.split(" ") if w])
 
+# is_correct_fuzzy（是否正确模糊匹配），用于是否正确模糊匹配。
 def is_correct_fuzzy(user: str, correct: str, *, threshold: float = 0.80, min_len_for_fuzzy: int = 4) -> bool:
     u = _norm(user)
     c = _norm(correct)
@@ -99,14 +100,14 @@ def is_correct_fuzzy(user: str, correct: str, *, threshold: float = 0.80, min_le
     ratio = difflib.SequenceMatcher(None, u2, c2).ratio()
     return ratio >= threshold
 
-import os, json
-
+# _pref_path（偏好路径），用于偏好路径。
 def _pref_path() -> str:
     # 放在项目同目录（最符合你“可复用、可携带”的诉求）
     # 如果你更想全局记忆，也可以换成 os.path.expanduser("~/.generalMemoryScript.json")
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(here, ".gms_prefs.json")
 
+# load_prefs（加载偏好设置），用于加载偏好设置。
 def load_prefs() -> dict:
     p = _pref_path()
     try:
@@ -115,6 +116,7 @@ def load_prefs() -> dict:
     except Exception:
         return {}
 
+# save_prefs（保存偏好设置），用于保存偏好设置。
 def save_prefs(d: dict) -> None:
     p = _pref_path()
     try:
@@ -123,10 +125,12 @@ def save_prefs(d: dict) -> None:
     except Exception:
         pass
 
+# get_last_deck_path（获取上次词典路径），用于获取上次词典路径。
 def get_last_deck_path() -> str | None:
     path, _, _ = get_last_deck_info()
     return path
 
+# get_last_deck_info（获取上次词典信息），用于获取上次词典信息。
 def get_last_deck_info() -> tuple[str | None, int, str | None]:
     d = load_prefs()
     path = d.get("last_deck_path")
@@ -140,11 +144,7 @@ def get_last_deck_info() -> tuple[str | None, int, str | None]:
         return path, max(1, col), sep
     return None, 1, None
 
-def set_last_deck_path(path: str) -> None:
-    d = load_prefs()
-    d["last_deck_path"] = path
-    save_prefs(d)
-
+# set_last_deck_info（设置上次词典信息），用于设置上次词典信息。
 def set_last_deck_info(path: str, col: int, sep: str | None) -> None:
     d = load_prefs()
     d["last_deck_path"] = path
@@ -152,6 +152,7 @@ def set_last_deck_info(path: str, col: int, sep: str | None) -> None:
     d["last_deck_sep"] = sep
     save_prefs(d)
 
+# ensure_deck_ready（确保词典就绪），用于确保词典就绪。
 def ensure_deck_ready(stdscr, state) -> bool:
     """
     若当前仍是内置默认词典（2条 bonjour/merci）且存在上次词典，
@@ -211,26 +212,7 @@ def ensure_deck_ready(stdscr, state) -> bool:
     return True
 
 
-def file_sha1(path: str, max_bytes: int = 2_000_000) -> str:
-    """取文件前 max_bytes 做 sha1（够稳定且快）"""
-    h = hashlib.sha1()
-    with open(path, "rb") as f:
-        h.update(f.read(max_bytes))
-    return h.hexdigest()[:12]
-
-def wrongbook_path_for_deck(deck_path: str) -> str:
-    """
-    为某个词典生成稳定的错题本路径：
-    .wrongbooks/<词典文件名>.<hash>.wrong.json
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    wb_dir = os.path.join(here, ".wrongbooks")
-    os.makedirs(wb_dir, exist_ok=True)
-
-    base = os.path.splitext(os.path.basename(deck_path))[0]
-    sig = file_sha1(deck_path)
-    return os.path.join(wb_dir, f"{base}.{sig}.wrong.json")
-
+# _init_locale（初始化本地化），用于初始化本地化。
 def _init_locale():
     # macOS Terminal / iTerm2 通常是 UTF-8；显式设置可减少 curses 乱码/宽字符异常
     try:
@@ -239,6 +221,7 @@ def _init_locale():
         pass
 
 
+# load_deck_into_state（加载词典into状态），用于加载词典into状态。
 def load_deck_into_state(state: "State", path: str, col: int, sep: str | None) -> Optional["State"]:
     try:
         new_deck = load_deck(path, start_col_1based=col, sep=sep)
@@ -252,6 +235,7 @@ def load_deck_into_state(state: "State", path: str, col: int, sep: str | None) -
     wrong_db = load_wrong_db(wrong_path)
     return State(deck=new_deck, deck_path=path, deck_id=new_id, wrong_path=wrong_path, wrong_db=wrong_db)
 
+# display_width（显示宽度），用于显示宽度。
 def display_width(s: str) -> int:
     """粗略计算终端显示宽度（处理 CJK 宽字符）。"""
     w = 0
@@ -265,6 +249,7 @@ def display_width(s: str) -> int:
         w += 2 if ea in ("W", "F") else 1
     return w
 
+# truncate_to_width（截断到宽度），用于截断到宽度。
 def truncate_to_width(s: str, max_w: int) -> str:
     if max_w <= 0:
         return ""
@@ -283,6 +268,7 @@ def truncate_to_width(s: str, max_w: int) -> str:
         w += cw
     return "".join(out)
 
+# safe_addstr（安全写入字符串），用于安全写入字符串。
 def safe_addstr(stdscr, y: int, x: int, s: str, attr: int = 0):
     """在 macOS 上更稳的 addstr：自动裁剪 + 吞掉 curses.error。"""
     try:
@@ -297,12 +283,14 @@ def safe_addstr(stdscr, y: int, x: int, s: str, attr: int = 0):
         return
 
 
+# safe_str（安全字符串），用于安全字符串。
 def safe_str(x) -> str:
     if x is None:
         return ""
     return str(x).strip()
 
 
+# parse_tokens（解析词元），用于解析词元。
 def parse_tokens(s: str) -> List[str]:
     s = safe_str(s)
     if not s:
@@ -311,6 +299,7 @@ def parse_tokens(s: str) -> List[str]:
     return [t for t in s.split(" ") if t.strip()]
 
 
+# split_alternatives（拆分备选项），用于拆分备选项。
 def split_alternatives(cell: str) -> List[str]:
     """一个单元格里可用 | ; ； / 、 分隔多个可接受答案。"""
     cell = safe_str(cell)
@@ -320,10 +309,12 @@ def split_alternatives(cell: str) -> List[str]:
     return parts or [cell]
 
 
+# norm_text（规范化文本），用于规范化文本。
 def norm_text(s: str) -> str:
     """宽松归一：去首尾空白 + Unicode casefold（对中日韩基本无影响）。"""
     return strip_accents(safe_str(s)).casefold()
 
+# strip_accents（去除重音），用于去除重音。
 def strip_accents(s: str) -> str:
     """
     去除拉丁字母的重音符号：
@@ -337,6 +328,7 @@ def strip_accents(s: str) -> str:
         if unicodedata.category(ch) != "Mn"
     )
 
+# choose_delimiter（选择分隔符），用于选择分隔符。
 def choose_delimiter(first_line: str, forced: Optional[str]) -> str:
     if forced:
         return forced
@@ -344,6 +336,7 @@ def choose_delimiter(first_line: str, forced: Optional[str]) -> str:
     return "\t" if ("\t" in first_line and first_line.count("\t") >= first_line.count(",")) else ","
 
 
+# deck_id_from_path（词典标识从路径），用于词典标识从路径。
 def deck_id_from_path(path: str) -> str:
     # 用文件绝对路径生成稳定 ID（避免不同词典共用错题本）
     # 注意：内置 hash() 在不同进程会变化，因此用 sha1 做稳定哈希
@@ -353,6 +346,7 @@ def deck_id_from_path(path: str) -> str:
 
 # --------------------------- Loaders ---------------------------
 
+# load_deck_from_csv（加载词典从CSV），用于加载词典从CSV。
 def load_deck_from_csv(path: str, start_col_1based: int = 1, sep: Optional[str] = None) -> List[Dict[str, str]]:
     start = max(1, int(start_col_1based))
     idx_a = start - 1
@@ -380,6 +374,7 @@ def load_deck_from_csv(path: str, start_col_1based: int = 1, sep: Optional[str] 
         return deck
 
 
+# load_deck_from_xlsx（加载词典从XLSX），用于加载词典从XLSX。
 def load_deck_from_xlsx(path: str, start_col_1based: int = 1) -> List[Dict[str, str]]:
     try:
         import openpyxl  # type: ignore
@@ -406,6 +401,7 @@ def load_deck_from_xlsx(path: str, start_col_1based: int = 1) -> List[Dict[str, 
     return deck
 
 
+# load_deck_from_json（加载词典从JSON），用于加载词典从JSON。
 def load_deck_from_json(path: str) -> List[Dict[str, str]]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -426,6 +422,7 @@ def load_deck_from_json(path: str) -> List[Dict[str, str]]:
     return deck
 
 
+# load_deck（加载词典），用于加载词典。
 def load_deck(path: str, start_col_1based: int = 1, sep: Optional[str] = None) -> List[Dict[str, str]]:
     ext = os.path.splitext(path)[1].lower()
     if ext in (".csv", ".tsv", ".txt"):
@@ -439,6 +436,7 @@ def load_deck(path: str, start_col_1based: int = 1, sep: Optional[str] = None) -
 
 # --------------------------- Persistence (wrong book) ---------------------------
 
+# save_wrong_db（保存错题数据库），用于保存错题数据库。
 def save_wrong_db(path: str, db: List[Dict]) -> None:
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -447,6 +445,7 @@ def save_wrong_db(path: str, db: List[Dict]) -> None:
         pass
 
 
+# load_wrong_db（加载错题数据库），用于加载错题数据库。
 def load_wrong_db(path: str) -> List[Dict]:
     if not os.path.exists(path):
         return []
@@ -463,6 +462,7 @@ def load_wrong_db(path: str) -> List[Dict]:
         return []
 
 
+# _norm_user_wrong_for_key（规范化用户错题for键），用于规范化用户错题for键。
 def _norm_user_wrong_for_key(a_field: str, user_wrong: str) -> str:
     if user_wrong is None:
         return ""
@@ -472,6 +472,7 @@ def _norm_user_wrong_for_key(a_field: str, user_wrong: str) -> str:
     return norm_text(uw)
 
 
+# dedup_wrong_db（去重错题数据库），用于去重错题数据库。
 def dedup_wrong_db(db: List[Dict], path: str) -> List[Dict]:
     """同 (deck_id, item_index, question_field, answer_field, user_wrong_norm) 合并。"""
     merged = {}
@@ -498,6 +499,7 @@ def dedup_wrong_db(db: List[Dict], path: str) -> List[Dict]:
     return db
 
 
+# weighted_pick_wrong（加权选择错题），用于加权选择错题。
 def weighted_pick_wrong(db: List[Dict], exclude_id: Optional[str] = None) -> Optional[Dict]:
     candidates = [e for e in db if e.get("weight", 1) > 0]
     if not candidates:
@@ -525,6 +527,7 @@ class State:
     wrong_db: List[Dict]
 
 
+# add_wrong_entry（添加错题entry），用于添加错题entry。
 def add_wrong_entry(state: State, item_index: int, q_field: str, a_field: str, user_wrong: str, mode: str) -> None:
     item = state.deck[item_index]
     entry = {
@@ -547,12 +550,14 @@ def add_wrong_entry(state: State, item_index: int, q_field: str, a_field: str, u
 
 # --------------------------- UI helpers ---------------------------
 
+# center_text（居中文本），用于居中文本。
 def center_text(stdscr, y, text, attr=0):
     h, w = stdscr.getmaxyx()
     tx = str(text)
     x = max(0, (w - display_width(tx)) // 2)
     safe_addstr(stdscr, y, x, tx, attr)
 
+# draw_header（绘制标题），用于绘制标题。
 def draw_header(stdscr, title: str):
     stdscr.clear()
     h, w = stdscr.getmaxyx()
@@ -567,6 +572,7 @@ def draw_header(stdscr, title: str):
         safe_addstr(stdscr, 2, 0, "└" + border + "┘")
 
 
+# wait_key（等待键），用于等待键。
 def wait_key(stdscr, prompt="任意键继续，X返回菜单"):
     h, w = stdscr.getmaxyx()
     safe_addstr(stdscr, h - 2, 2, " " * max(0, w - 4))
@@ -579,6 +585,7 @@ def wait_key(stdscr, prompt="任意键继续，X返回菜单"):
         return "any"
 
 
+# input_line（输入行），用于输入行。
 def input_line(stdscr, prompt: str) -> str:
     h, w = stdscr.getmaxyx()
     y = min(4, h - 4)
@@ -593,6 +600,7 @@ def input_line(stdscr, prompt: str) -> str:
     return s.strip()
 
 
+# paginate_lines（分页行列表），用于分页行列表。
 def paginate_lines(stdscr, lines: List[str], start_y=4):
     h, w = stdscr.getmaxyx()
     max_lines = max(0, h - start_y - 3)
@@ -606,6 +614,7 @@ FIELDS = ["A", "B"]
 FIELD_NAMES = {"A": "A", "B": "B"}
 
 
+# build_mcq（构建选择题），用于构建选择题。
 def build_mcq(state: State) -> Tuple[str, List[str], int, Dict]:
     item_idx = random.randrange(len(state.deck))
     q_field = random.choice(FIELDS)
@@ -639,6 +648,7 @@ def build_mcq(state: State) -> Tuple[str, List[str], int, Dict]:
     return question, options, correct_idx, meta
 
 
+# build_fillin（构建填空题），用于构建填空题。
 def build_fillin(state: State) -> Tuple[str, Dict, List[str]]:
     item_idx = random.randrange(len(state.deck))
     q_field = "B"
@@ -651,6 +661,7 @@ def build_fillin(state: State) -> Tuple[str, Dict, List[str]]:
     return prompt, meta, correct_values
 
 
+# build_tf_new（构建判断题新），用于构建判断题新。
 def build_tf_new(state: State) -> Tuple[str, bool, Dict]:
     item_idx = random.randrange(len(state.deck))
     q_field = random.choice(FIELDS)
@@ -678,6 +689,7 @@ def build_tf_new(state: State) -> Tuple[str, bool, Dict]:
 
 # --------------------------- Modes ---------------------------
 
+# mode_flashcards（模式记忆卡），用于模式记忆卡。
 def mode_flashcards(stdscr, state: State):
     title = "记忆卡：A/D 或 ←/→ 切换；Q 切换随机/顺序；x返回"
     order = list(range(len(state.deck)))
@@ -708,6 +720,7 @@ def mode_flashcards(stdscr, state: State):
             idx = 0
 
 
+# mode_mcq（模式选择题），用于模式选择题。
 def mode_mcq(stdscr, state: State):
     title = "选择题：1-4 或 ↑/↓/W/S 选择，回车提交；x返回"
     if len(state.deck) < 2:
@@ -760,6 +773,7 @@ def mode_mcq(stdscr, state: State):
             return
 
 
+# mode_fillin（模式填空题），用于模式填空题。
 def mode_fillin(stdscr, state: State):
     title = "填空题：输入后回车；支持答案同义项（单元格里用 | 分隔）；x返回"
     while True:
@@ -804,6 +818,7 @@ def mode_fillin(stdscr, state: State):
 
         user_norm = norm_text(user)
         # 先严格再模糊：correct_values 里任意一个答案命中就算对
+        # _match_one（matchone），用于matchone。
         def _match_one(ans: str) -> bool:
             wc = word_count(ans)
             if wc >= 3:
@@ -834,6 +849,7 @@ def mode_fillin(stdscr, state: State):
             return
 
 
+# mode_tf_new（模式判断题新），用于模式判断题新。
 def mode_tf_new(stdscr, state: State):
     title = "判断题：Q=正确  E=错误；x返回"
     if len(state.deck) < 2:
@@ -875,6 +891,7 @@ def mode_tf_new(stdscr, state: State):
                 break
 
 
+# mode_tf_from_wrongbook（模式判断题从错题本），用于模式判断题从错题本。
 def mode_tf_from_wrongbook(stdscr, state: State):
     if not any(e.get("weight", 1) > 0 for e in state.wrong_db):
         draw_header(stdscr, "错题本模式")
@@ -1097,6 +1114,7 @@ def mode_tf_from_wrongbook(stdscr, state: State):
             return
 
 
+# mode_load_deck（模式加载词典），用于模式加载词典。
 def mode_load_deck(stdscr, state: State) -> Optional[State]:
     draw_header(stdscr, "加载新词典（x取消）")
     path = input_line(stdscr, "输入文件路径（.xlsx/.csv/.json）：")
@@ -1145,6 +1163,7 @@ def mode_load_deck(stdscr, state: State) -> Optional[State]:
     return State(deck=new_deck, deck_path=path, deck_id=new_id, wrong_path=wrong_path, wrong_db=wrong_db)
 
 
+# mode_info（模式信息），用于模式信息。
 def mode_info(stdscr, state: State):
     draw_header(stdscr, "当前词典信息（x返回）")
     lines = [
@@ -1177,6 +1196,7 @@ MENU_ITEMS = [
     ("退出", "exit"),
 ]
 
+# menu_handle_key（菜单处理键），用于菜单处理键。
 def menu_handle_key(key: int, sel: int, items):
     """
     返回 (action, sel)
@@ -1218,6 +1238,7 @@ def menu_handle_key(key: int, sel: int, items):
 
     return None, sel
 
+# menu（菜单），用于菜单。
 def menu(stdscr, initial_state: State):
     curses.curs_set(0)
     state = initial_state
@@ -1232,34 +1253,6 @@ def menu(stdscr, initial_state: State):
         safe_addstr(stdscr, 16, 4, f"条目：{len(state.deck)}    错题（权重>0）：{len([e for e in state.wrong_db if e.get('weight',1)>0])}")
         stdscr.refresh()
 
-        ch = stdscr.getch()
-        action = None;
-
-        # Exit
-        if ch in (27,):  # ESC
-            break
-
-        # Move selection only (do NOT execute)
-        if ch in (curses.KEY_UP, ord("w"), ord("W")):
-            sel = (sel - 1) % len(MENU_ITEMS)
-            continue
-        if ch in (curses.KEY_DOWN, ord("s"), ord("S")):
-            sel = (sel + 1) % len(MENU_ITEMS)
-            continue
-
-        if ch in (10, 13, curses.KEY_ENTER):  # Enter
-            action = MENU_ITEMS[sel][1]
-        else:
-            if ord("0") <= ch <= ord("9"):
-                d = ch - ord("0")
-                target = 9 if d == 0 else (d - 1);
-                if 0 <= target < len(MENU_ITEMS):
-                    sel = target
-                continue
-            else:
-                continue
-
-        # 主循环（示意：你要放在 while True: 里面）
         key = stdscr.getch()
         action, sel = menu_handle_key(key, sel, MENU_ITEMS)
 
@@ -1275,11 +1268,6 @@ def menu(stdscr, initial_state: State):
             new_state = mode_load_deck(stdscr, state)
             if new_state is not None:
                 state = new_state
-                set_last_deck_path(state.deck_path)
-                # ✅ 关键新增：让错题本跟词典绑定
-                if getattr(state, "deck_path", None) and os.path.isfile(state.deck_path):
-                    state.wrong_path = wrongbook_path_for_deck(state.deck_path)
-                    state.wrong_db = load_wrong_db(state.wrong_path)  # 读老错题本（不存在则空）
 
         elif action == "info":
             mode_info(stdscr, state)
@@ -1324,6 +1312,7 @@ def menu(stdscr, initial_state: State):
             wait_key(stdscr)
 
 
+# build_initial_state（构建initial状态），用于构建initial状态。
 def build_initial_state(args) -> State:
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -1353,6 +1342,7 @@ def build_initial_state(args) -> State:
     return State(deck=deck, deck_path=deck_path, deck_id=did, wrong_path=wrong_path, wrong_db=wrong_db)
 
 
+# main（主入口），用于主入口。
 def main():
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("path", nargs="?", default=None, help="词典文件路径（.xlsx/.csv/.json）")
