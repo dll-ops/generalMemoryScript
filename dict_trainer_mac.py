@@ -34,6 +34,7 @@ import random
 import re
 import time
 import uuid
+import unicodedata
 import difflib
 import hashlib
 from dataclasses import dataclass
