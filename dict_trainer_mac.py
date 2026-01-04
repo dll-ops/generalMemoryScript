@@ -124,15 +124,32 @@ def save_prefs(d: dict) -> None:
         pass
 
 def get_last_deck_path() -> str | None:
+    path, _, _ = get_last_deck_info()
+    return path
+
+def get_last_deck_info() -> tuple[str | None, int, str | None]:
     d = load_prefs()
     path = d.get("last_deck_path")
     if path and os.path.isfile(path):
-        return path
-    return None
+        col = d.get("last_deck_col", 1)
+        sep = d.get("last_deck_sep")
+        try:
+            col = int(col)
+        except Exception:
+            col = 1
+        return path, max(1, col), sep
+    return None, 1, None
 
 def set_last_deck_path(path: str) -> None:
     d = load_prefs()
     d["last_deck_path"] = path
+    save_prefs(d)
+
+def set_last_deck_info(path: str, col: int, sep: str | None) -> None:
+    d = load_prefs()
+    d["last_deck_path"] = path
+    d["last_deck_col"] = int(col)
+    d["last_deck_sep"] = sep
     save_prefs(d)
 
 def ensure_deck_ready(stdscr, state) -> bool:
@@ -141,7 +158,7 @@ def ensure_deck_ready(stdscr, state) -> bool:
     则提示是否应用上次词典。用户选择否，则继续使用当前词典。
     返回 True 表示可以继续进入训练模式；False 表示用户取消返回菜单。
     """
-    last_path = get_last_deck_path()
+    last_path, last_col, last_sep = get_last_deck_info()
     if not last_path:
         return True
 
@@ -174,14 +191,15 @@ def ensure_deck_ready(stdscr, state) -> bool:
         # 复用你现有的“加载词典”底层函数
         # 你代码里大概率有类似：load_deck_from_path(path) 或 read_pairs(path)
         try:
-            new_state = load_deck_into_state(state, last_path)  # ← 下面第4步会给实现
-            if new_state is not None:
-                # 如果你 load 函数返回 new_state
-                state.deck = new_state.deck
-                state.deck_path = new_state.deck_path
-            else:
-                # 如果是就地修改 state，也可以什么都不做
-                pass
+            new_state = load_deck_into_state(state, last_path, last_col, last_sep)
+            if new_state is None:
+                raise RuntimeError("读取上次词典失败")
+            # 如果你 load 函数返回 new_state
+            state.deck = new_state.deck
+            state.deck_path = new_state.deck_path
+            state.deck_id = new_state.deck_id
+            state.wrong_path = new_state.wrong_path
+            state.wrong_db = new_state.wrong_db
             return True
         except Exception as e:
             draw_header(stdscr, "应用失败")
@@ -219,6 +237,20 @@ def _init_locale():
         locale.setlocale(locale.LC_ALL, "")
     except Exception:
         pass
+
+
+def load_deck_into_state(state: "State", path: str, col: int, sep: str | None) -> Optional["State"]:
+    try:
+        new_deck = load_deck(path, start_col_1based=col, sep=sep)
+    except Exception:
+        return None
+    if len(new_deck) < 1:
+        return None
+    new_id = deck_id_from_path(path)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    wrong_path = os.path.join(script_dir, f"wrong_book_{new_id}.json")
+    wrong_db = load_wrong_db(wrong_path)
+    return State(deck=new_deck, deck_path=path, deck_id=new_id, wrong_path=wrong_path, wrong_db=wrong_db)
 
 def display_width(s: str) -> int:
     """粗略计算终端显示宽度（处理 CJK 宽字符）。"""
@@ -313,9 +345,10 @@ def choose_delimiter(first_line: str, forced: Optional[str]) -> str:
 
 
 def deck_id_from_path(path: str) -> str:
-    # 用文件绝对路径生成一个稳定 ID（避免不同词典共用错题本）
+    # 用文件绝对路径生成稳定 ID（避免不同词典共用错题本）
+    # 注意：内置 hash() 在不同进程会变化，因此用 sha1 做稳定哈希
     ap = os.path.abspath(path)
-    return str(abs(hash(ap)))
+    return hashlib.sha1(ap.encode("utf-8")).hexdigest()[:12]
 
 
 # --------------------------- Loaders ---------------------------
@@ -965,6 +998,7 @@ def mode_load_deck(stdscr, state: State) -> Optional[State]:
     paginate_lines(stdscr, [f"路径：{path}", f"条目数：{len(new_deck)}", f"错题本：{os.path.basename(wrong_path)}"])
     stdscr.refresh()
     wait_key(stdscr)
+    set_last_deck_info(path, col, sep)
     return State(deck=new_deck, deck_path=path, deck_id=new_id, wrong_path=wrong_path, wrong_db=wrong_db)
 
 
@@ -1045,6 +1079,8 @@ def menu(stdscr, initial_state: State):
     curses.curs_set(0)
     state = initial_state
     sel = 0
+    if not ensure_deck_ready(stdscr, state):
+        return
     while True:
         draw_header(stdscr, "词典记忆助手  ⛽  ↑/↓ 或 W/S 移动，Enter 选择，数字直达，ESC 退出")
         for i, (name, _) in enumerate(MENU_ITEMS):
@@ -1151,6 +1187,7 @@ def build_initial_state(args) -> State:
     if args.path:
         deck_path = args.path
         deck = load_deck(deck_path, start_col_1based=args.col, sep=args.sep)
+        set_last_deck_info(deck_path, args.col, args.sep)
     else:
         # 默认词典：脚本目录下 dict.csv 或 dict.xlsx（如果存在）
         candidate = None
