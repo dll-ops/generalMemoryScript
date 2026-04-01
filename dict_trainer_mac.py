@@ -822,7 +822,7 @@ def mode_fillin(stdscr, state: State):
         def _match_one(ans: str) -> bool:
             wc = word_count(ans)
             if wc >= 3:
-                return is_correct_fuzzy(user, ans, threshold=0.80, min_len=1)  # min_len在这里不再负责开关
+                return is_correct_fuzzy(user, ans, threshold=0.80, min_len_for_fuzzy=1)
             else:
                 return norm_text(user) == norm_text(ans)
 
