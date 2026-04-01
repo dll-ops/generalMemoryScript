@@ -34,6 +34,7 @@ import random
 import re
 import time
 import uuid
+import unicodedata
 import difflib
 import hashlib
 from dataclasses import dataclass
@@ -124,11 +125,6 @@ def save_prefs(d: dict) -> None:
             json.dump(d, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
-
-# get_last_deck_path（获取上次词典路径），用于获取上次词典路径。
-def get_last_deck_path() -> str | None:
-    path, _, _ = get_last_deck_info()
-    return path
 
 # normalize_deck_path（规范化词典路径），用于规范化词典路径。
 def normalize_deck_path(path: str) -> str:
@@ -812,10 +808,6 @@ def mode_fillin(stdscr, state: State):
             curses.noecho()
 
         user = safe_str(s)
-        item = state.deck[meta["item_index"]]
-        q_text = item[meta["q_field"]]
-        a_text = " / ".join(correct_values)
-
         if not user:
             draw_header(stdscr, "结果")
             center_text(stdscr, 6, "❗ 不能为空。")
@@ -824,6 +816,7 @@ def mode_fillin(stdscr, state: State):
                 return
             continue
 
+        user_norm = norm_text(user)
         # 先严格再模糊：correct_values 里任意一个答案命中就算对
         # _match_one（matchone），用于matchone。
         def _match_one(ans: str) -> bool:
@@ -911,20 +904,26 @@ def mode_tf_from_wrongbook(stdscr, state: State):
         wait_key(stdscr)
         return
 
+    title = "错题本模式：按错题原题型出题  x返回"
     last_id = None
-    title = "错题本模式：Q=正确  E=错误  P=删除权重为0  x返回"
-    while True:
-        entry = weighted_pick_wrong(state.wrong_db, exclude_id=last_id)
-        if entry is None:
-            draw_header(stdscr, "错题本模式")
-            center_text(stdscr, 6, "📭 错题本为空或无权重题。")
-            stdscr.refresh()
-            wait_key(stdscr)
-            return
-        last_id = entry.get("id")
 
+    def _maybe_delete_if_zero(entry):
+        if entry.get("weight", 1) == 0:
+            center_text(stdscr, 10, "按 P 删除该错题（权重=0），任意键跳过保留")
+            stdscr.refresh()
+            ch2 = stdscr.getch()
+            if ch2 in (ord("p"), ord("P")):
+                state.wrong_db[:] = [e for e in state.wrong_db if e.get("id") != entry.get("id")]
+                save_wrong_db(state.wrong_path, state.wrong_db)
+                center_text(stdscr, 12, "🗑️ 已删除。")
+                stdscr.refresh()
+                wait_key(stdscr)
+
+    def ask_tf(entry):
+        """判断题（保留你原来的逻辑，基本不动）"""
         use_correct = random.choice([True, False])
         a_field = entry["answer_field"]
+
         if not use_correct:
             cand = safe_str(entry.get("user_wrong", ""))
             if cand.lower() in ("q", "e") or not cand:
@@ -945,8 +944,8 @@ def mode_tf_from_wrongbook(stdscr, state: State):
         while True:
             ch = stdscr.getch()
             if ch in (ord("x"), ord("X")):
-                return
-            elif ch in (ord("q"), ord("Q"), ord("e"), ord("E")):
+                return "exit"
+            if ch in (ord("q"), ord("Q"), ord("e"), ord("E")):
                 user_true = ch in (ord("q"), ord("Q"))
                 real_true = norm_text(shown_val) == norm_text(entry["correct_value"])
                 if user_true == real_true:
@@ -969,6 +968,8 @@ def mode_tf_from_wrongbook(stdscr, state: State):
                     center_text(stdscr, 6, "❌ 判断错误。权重 +2")
                     safe_addstr(stdscr, 8, 4, f"正确应为：{FIELD_NAMES[a_field]} = {entry['correct_value']}")
                     entry["weight"] = entry.get("weight", 1) + 2
+
+                    # 仍然记录为错题本判断（保持你原来逻辑）
                     add_wrong_entry(
                         state,
                         item_index=entry["item_index"],
@@ -978,15 +979,73 @@ def mode_tf_from_wrongbook(stdscr, state: State):
                         mode="tf-wb",
                     )
                     save_wrong_db(state.wrong_path, state.wrong_db)
+
                 stdscr.refresh()
                 if wait_key(stdscr) == "esc":
-                    return
-                break
-            elif ch in (ord("p"), ord("P")) and entry.get("weight", 1) == 0:
-                state.wrong_db[:] = [e for e in state.wrong_db if e.get("id") != entry.get("id")]
-                save_wrong_db(state.wrong_path, state.wrong_db)
-                break
+                    return "exit"
+                return "done"
 
+    def ask_fill(entry):
+        """填空题：题干=entry.question_value，输入=答案字段"""
+        q_field = entry["question_field"]
+        a_field = entry["answer_field"]
+        qv = entry["question_value"]
+        correct = entry["correct_value"]
+        correct_values = split_alternatives(correct)
+
+        draw_header(stdscr, title)
+        safe_addstr(stdscr, 4, 2, f"题干（{FIELD_NAMES[q_field]}）：{qv}")
+        safe_addstr(stdscr, 6, 2, f"请输入对应的 {FIELD_NAMES[a_field]}（x返回）：")
+        stdscr.refresh()
+
+        curses.echo()
+        try:
+            s = stdscr.getstr(7, 2, 400).decode("utf-8", errors="ignore")
+        finally:
+            curses.noecho()
+
+        user = safe_str(s)
+        if norm_text(user) in ("x",):
+            return "exit"
+
+        # 这里复用你现有的判分策略：严格/模糊你已经实现过就用你那套
+        # 先严格再模糊（示例：直接用你已有的 is_correct_fuzzy）
+        ok = any(is_correct_fuzzy(user, ans, threshold=0.80) if True else (norm_text(user) == norm_text(ans))
+                 for ans in correct_values)
+
+        draw_header(stdscr, "结果")
+        safe_addstr(stdscr, 6, 4, f"题目：{qv}")
+        safe_addstr(stdscr, 7, 4, f"正确答案：{' / '.join(correct_values)}")
+
+        if ok:
+            center_text(stdscr, 9, "✅ 正确！权重 -1")
+            entry["weight"] = max(0, entry.get("weight", 1) - 1)
+            save_wrong_db(state.wrong_path, state.wrong_db)
+            _maybe_delete_if_zero(entry)
+        else:
+            center_text(stdscr, 9, "❌ 错误。权重 +2")
+            entry["weight"] = entry.get("weight", 1) + 2
+            add_wrong_entry(
+                state,
+                item_index=entry["item_index"],
+                q_field=q_field,
+                a_field=a_field,
+                user_wrong=user,
+                mode="fill",
+            )
+            save_wrong_db(state.wrong_path, state.wrong_db)
+
+        stdscr.refresh()
+        if wait_key(stdscr) == "esc":
+            return "exit"
+        return "done"
+
+    def ask_mcq(entry):
+        """选择题：根据错题生成 4 选 1（含正确项）"""
+        q_field = entry["question_field"]
+        a_field = entry["answer_field"]
+        qv = entry["question_value"]
+        correct = entry["correct_value"]
 
 # mode_load_deck（模式加载词典），用于模式加载词典。
 def mode_load_deck(stdscr, state: State) -> Optional[State]:
