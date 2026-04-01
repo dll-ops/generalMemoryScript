@@ -126,10 +126,9 @@ def save_prefs(d: dict) -> None:
     except Exception:
         pass
 
-# get_last_deck_path（获取上次词典路径），用于获取上次词典路径。
-def get_last_deck_path() -> str | None:
-    path, _, _ = get_last_deck_info()
-    return path
+# normalize_deck_path（规范化词典路径），用于规范化词典路径。
+def normalize_deck_path(path: str) -> str:
+    return os.path.abspath(os.path.expanduser(path))
 
 # get_last_deck_info（获取上次词典信息），用于获取上次词典信息。
 def get_last_deck_info() -> tuple[str | None, int, str | None]:
@@ -150,7 +149,7 @@ def get_last_deck_info() -> tuple[str | None, int, str | None]:
 # set_last_deck_info（设置上次词典信息），用于设置上次词典信息。
 def set_last_deck_info(path: str, col: int, sep: str | None) -> None:
     d = load_prefs()
-    d["last_deck_path"] = path
+    d["last_deck_path"] = normalize_deck_path(path)
     d["last_deck_col"] = int(col)
     d["last_deck_sep"] = sep
     save_prefs(d)
@@ -224,8 +223,9 @@ def _init_locale():
         pass
 
 
-# load_deck_into_state（加载词典into状态），用于加载词典into状态。
+# load_deck_into_state（加载词典到状态），用于加载词典到状态。
 def load_deck_into_state(state: "State", path: str, col: int, sep: str | None) -> Optional["State"]:
+    path = normalize_deck_path(path)
     try:
         new_deck = load_deck(path, start_col_1based=col, sep=sep)
     except Exception:
@@ -758,10 +758,15 @@ def mode_mcq(stdscr, state: State):
                 user_idx = sel
                 break
 
-        draw_header(stdscr, "结果")
         if user_idx == correct_idx:
-            center_text(stdscr, 6, "✅ 正确！")
+            draw_header(stdscr, title)
+            paginate_lines(stdscr, question.split("\n"), start_y=4)
+            for i, opt in enumerate(options):
+                prefix = "➤ " if i == user_idx else "  "
+                suffix = " ✅" if i == user_idx else ""
+                safe_addstr(stdscr, 7 + i, 4, f"{prefix}{i+1}. {opt}{suffix}")
         else:
+            draw_header(stdscr, "结果")
             center_text(stdscr, 6, f"❌ 错误。正确答案：{options[correct_idx]}")
             add_wrong_entry(
                 state,
@@ -803,16 +808,8 @@ def mode_fillin(stdscr, state: State):
             curses.noecho()
 
         user = safe_str(s)
-        draw_header(stdscr, "结果")
-
-
-        item = state.deck[meta["item_index"]]
-        q_text = item[meta["q_field"]]
-        a_text = " / ".join(correct_values)
-
         if not user:
-            safe_addstr(stdscr, 6, 4, f"题目：{q_text}")
-            safe_addstr(stdscr, 7, 4, f"正确答案：{a_text}")
+            draw_header(stdscr, "结果")
             center_text(stdscr, 6, "❗ 不能为空。")
             stdscr.refresh()
             if wait_key(stdscr) == "esc":
@@ -832,10 +829,12 @@ def mode_fillin(stdscr, state: State):
         ok = any(_match_one(ans) for ans in correct_values)
 
         if ok:
-            safe_addstr(stdscr, 6, 4, f"题目：{q_text}")
-            safe_addstr(stdscr, 7, 4, f"正确答案：{a_text}")
-            center_text(stdscr, 9, "✅ 正确！")
+            draw_header(stdscr, title)
+            paginate_lines(stdscr, prompt.split("\n"), start_y=4)
+            safe_addstr(stdscr, 10, 4, f"你的输入：{user} ✅")
+            safe_addstr(stdscr, 11, 4, f"标准答案：{a_text}")
         else:
+            draw_header(stdscr, "结果")
             safe_addstr(stdscr, 6, 4, f"题目：{q_text}")
             safe_addstr(stdscr, 7, 4, f"正确答案：{a_text}")
             center_text(stdscr, 9, "❌ 错误")
@@ -874,10 +873,12 @@ def mode_tf_new(stdscr, state: State):
                 return
             elif ch in (ord("q"), ord("Q"), ord("e"), ord("E")):
                 user_true = ch in (ord("q"), ord("Q"))
-                draw_header(stdscr, "结果")
                 if user_true == is_true:
-                    center_text(stdscr, 6, "✅ 判断正确")
+                    draw_header(stdscr, title)
+                    paginate_lines(stdscr, statement.split("\n"), start_y=4)
+                    safe_addstr(stdscr, 8, 4, f"你的判断：{'Q' if user_true else 'E'} ✅")
                 else:
+                    draw_header(stdscr, "结果")
                     center_text(stdscr, 6, "❌ 判断错误")
                     safe_addstr(stdscr, 8, 4, f"正确应为：{FIELD_NAMES[meta['a_field']]} = {meta['correct_val']}")
                     add_wrong_entry(
@@ -947,14 +948,23 @@ def mode_tf_from_wrongbook(stdscr, state: State):
             if ch in (ord("q"), ord("Q"), ord("e"), ord("E")):
                 user_true = ch in (ord("q"), ord("Q"))
                 real_true = norm_text(shown_val) == norm_text(entry["correct_value"])
-
-                draw_header(stdscr, "结果")
                 if user_true == real_true:
-                    center_text(stdscr, 6, "✅ 判断正确。权重 -1")
+                    draw_header(stdscr, title)
+                    safe_addstr(stdscr, 4, 2, statement)
+                    safe_addstr(stdscr, 5, 2, assertion)
+                    safe_addstr(stdscr, 7, 2, f"你的判断：{'Q' if user_true else 'E'} ✅  权重 -1")
                     entry["weight"] = max(0, entry.get("weight", 1) - 1)
                     save_wrong_db(state.wrong_path, state.wrong_db)
-                    _maybe_delete_if_zero(entry)
+                    if entry["weight"] == 0:
+                        safe_addstr(stdscr, 9, 2, "按 P 删除该错题（权重=0），任意键跳过保留")
+                        stdscr.refresh()
+                        ch2 = stdscr.getch()
+                        if ch2 in (ord("p"), ord("P")):
+                            state.wrong_db[:] = [e for e in state.wrong_db if e.get("id") != entry.get("id")]
+                            save_wrong_db(state.wrong_path, state.wrong_db)
+                            safe_addstr(stdscr, 10, 2, "🗑️ 已删除。")
                 else:
+                    draw_header(stdscr, "结果")
                     center_text(stdscr, 6, "❌ 判断错误。权重 +2")
                     safe_addstr(stdscr, 8, 4, f"正确应为：{FIELD_NAMES[a_field]} = {entry['correct_value']}")
                     entry["weight"] = entry.get("weight", 1) + 2
@@ -1036,86 +1046,6 @@ def mode_tf_from_wrongbook(stdscr, state: State):
         a_field = entry["answer_field"]
         qv = entry["question_value"]
         correct = entry["correct_value"]
-
-        # 备选池：从全 deck 里抽别的答案
-        pool = []
-        for i in range(len(state.deck)):
-            if i == entry["item_index"]:
-                continue
-            pool.append(state.deck[i][a_field])
-        random.shuffle(pool)
-        options = [correct] + pool[:3]
-        # 不足 4 个也能跑
-        random.shuffle(options)
-
-        draw_header(stdscr, title)
-        safe_addstr(stdscr, 4, 2, f"题干（{FIELD_NAMES[q_field]}）：{qv}")
-        safe_addstr(stdscr, 6, 2, f"请选择正确的 {FIELD_NAMES[a_field]}（1-4，x返回）：")
-        for idx, opt in enumerate(options[:4], start=1):
-            safe_addstr(stdscr, 7 + idx, 4, f"{idx}. {opt}")
-
-        stdscr.refresh()
-
-        while True:
-            ch = stdscr.getch()
-            if ch in (ord("x"), ord("X")):
-                return "exit"
-            if ch in (ord("1"), ord("2"), ord("3"), ord("4")):
-                pick = int(chr(ch)) - 1
-                chosen = options[pick] if pick < len(options) else ""
-                ok = norm_text(chosen) == norm_text(correct)
-
-                draw_header(stdscr, "结果")
-                safe_addstr(stdscr, 6, 4, f"题目：{qv}")
-                safe_addstr(stdscr, 7, 4, f"正确答案：{correct}")
-
-                if ok:
-                    center_text(stdscr, 9, "✅ 选择正确。权重 -1")
-                    entry["weight"] = max(0, entry.get("weight", 1) - 1)
-                    save_wrong_db(state.wrong_path, state.wrong_db)
-                    _maybe_delete_if_zero(entry)
-                else:
-                    center_text(stdscr, 9, "❌ 选择错误。权重 +2")
-                    entry["weight"] = entry.get("weight", 1) + 2
-                    add_wrong_entry(
-                        state,
-                        item_index=entry["item_index"],
-                        q_field=q_field,
-                        a_field=a_field,
-                        user_wrong=chosen,
-                        mode="mcq",
-                    )
-                    save_wrong_db(state.wrong_path, state.wrong_db)
-
-                stdscr.refresh()
-                if wait_key(stdscr) == "esc":
-                    return "exit"
-                return "done"
-
-    while True:
-        entry = weighted_pick_wrong(state.wrong_db, exclude_id=last_id)
-        if entry is None:
-            draw_header(stdscr, "错题本模式")
-            center_text(stdscr, 6, "📭 错题本为空或无权重题。")
-            stdscr.refresh()
-            wait_key(stdscr)
-            return
-
-        last_id = entry.get("id")
-
-        m = safe_str(entry.get("mode", "")).lower()
-
-        if m.startswith("fill"):
-            r = ask_fill(entry)
-        elif m.startswith("mcq"):
-            r = ask_tf(entry)  # ✅ 选择题错题本：改成判断题
-        elif m.startswith("tf"):
-            r = ask_tf(entry)
-        else:
-            r = ask_tf(entry)
-        if r == "exit":
-            return
-
 
 # mode_load_deck（模式加载词典），用于模式加载词典。
 def mode_load_deck(stdscr, state: State) -> Optional[State]:
