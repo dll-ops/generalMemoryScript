@@ -135,6 +135,8 @@ def get_last_deck_path() -> str | None:
 def get_last_deck_info() -> tuple[str | None, int, str | None]:
     d = load_prefs()
     path = d.get("last_deck_path")
+    if path:
+        path = normalize_deck_path(path)
     if path and os.path.isfile(path):
         col = d.get("last_deck_col", 1)
         sep = d.get("last_deck_sep")
@@ -1123,6 +1125,7 @@ def mode_load_deck(stdscr, state: State) -> Optional[State]:
         return None
     if path.lower() in ("x", "exit", "quit"):
         return None
+    path = normalize_deck_path(path)
 
     col_s = input_line(stdscr, "起始列号（1=第1列，第2列自动作B；默认1）：") or "1"
     sep = None
@@ -1318,7 +1321,7 @@ def build_initial_state(args) -> State:
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     if args.path:
-        deck_path = args.path
+        deck_path = normalize_deck_path(args.path)
         deck = load_deck(deck_path, start_col_1based=args.col, sep=args.sep)
         set_last_deck_info(deck_path, args.col, args.sep)
     else:
