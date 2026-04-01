@@ -71,10 +71,8 @@ end tell
         return
 
     if plat.startswith("win"):
-        # Windows: 用 cmd /k 保持窗口不关闭
-        # start "" cmd /k "cd /d C:\path && python script.py"
-        full = f'cd /d "{cwd}" && {cmd}'
-        subprocess.run(["cmd", "/c", "start", "", "cmd", "/k", full], check=False)
+        # Windows: 用 cmd /k 保持窗口不关闭；通过 cwd 指定目录，避免 cd 命令解析问题
+        subprocess.run(["cmd", "/c", "start", "", "cmd", "/k", cmd], cwd=cwd, check=False)
         return
 
     # Linux / other: 尝试 x-terminal-emulator / gnome-terminal / konsole
